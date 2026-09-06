@@ -36,8 +36,13 @@ function spawnWithThreadLimit(extraThreads: number, script: string) {
   if (isRoot) cmd.unshift(Bun.which("runuser")!, "-u", "nobody", "--");
   return Bun.spawn({
     cmd,
-    // `nobody` has no writable home.
-    env: { ...bunEnv, HOME: "/tmp" },
+    env: {
+      ...bunEnv,
+      // `nobody` has no writable home.
+      HOME: "/tmp",
+      // LeakSanitizer needs a tracer thread at exit, which this limit refuses.
+      ASAN_OPTIONS: [bunEnv.ASAN_OPTIONS, "detect_leaks=0"].filter(Boolean).join(":"),
+    },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -61,8 +66,7 @@ test.skipIf(!canLimitThreads)("a GC under a thread limit does not abort the proc
   );
   const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
   expect(stdout).toBe("ok\n");
-  expect(stderr).not.toContain("ASSERTION FAILED");
-  expect(exitCode).toBe(0);
+  expect(exitCode, stderr).toBe(0);
 });
 
 test.skipIf(!canLimitThreads)("new Worker throws ERR_WORKER_INIT_FAILED when the OS refuses the thread", async () => {
@@ -88,6 +92,5 @@ test.skipIf(!canLimitThreads)("new Worker throws ERR_WORKER_INIT_FAILED when the
     message: "Worker initialization failure: EAGAIN",
     name: "Error",
   });
-  expect(stderr).not.toContain("ASSERTION FAILED");
-  expect(exitCode).toBe(0);
+  expect(exitCode, stderr).toBe(0);
 });

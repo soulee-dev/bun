@@ -7,8 +7,15 @@ import { readdirSync, readFileSync } from "node:fs";
 // root test runner drops to `nobody` through runuser.
 const isRoot = process.getuid?.() === 0;
 const hasPrlimit = isLinux && !!Bun.which("prlimit");
-const hasRunuser = !!Bun.which("runuser");
-const canLimitThreads = hasPrlimit && (!isRoot || hasRunuser);
+const nobodyUid = (() => {
+  if (!isLinux || !isRoot || !Bun.which("runuser")) return undefined;
+  const uid = readFileSync("/etc/passwd", "utf8")
+    .split("\n")
+    .find(line => line.startsWith("nobody:"))
+    ?.split(":")[2];
+  return uid === undefined ? undefined : Number(uid);
+})();
+const canLimitThreads = hasPrlimit && (!isRoot || nobodyUid !== undefined);
 
 /** Threads that already belong to `uid`. RLIMIT_NPROC is per uid, not per process. */
 function threadsOwnedBy(uid: number): number {
@@ -30,7 +37,7 @@ function threadsOwnedBy(uid: number): number {
 }
 
 function spawnWithThreadLimit(extraThreads: number, script: string) {
-  const uid = isRoot ? 65534 : process.getuid!();
+  const uid = isRoot ? nobodyUid! : process.getuid!();
   const limit = threadsOwnedBy(uid) + extraThreads;
   const cmd = [Bun.which("prlimit")!, `--nproc=${limit}`, bunExe(), "-e", script];
   if (isRoot) cmd.unshift(Bun.which("runuser")!, "-u", "nobody", "--");

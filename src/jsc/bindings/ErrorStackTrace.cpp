@@ -392,7 +392,7 @@ JSC::SourceCode classSourceOfDefaultConstructor(JSC::CodeBlock* codeBlock)
         return {};
     }
 
-    auto* unlinkedExecutable = jsCast<JSC::FunctionExecutable*>(codeBlock->ownerExecutable())->unlinkedExecutable();
+    auto* unlinkedExecutable = uncheckedDowncast<JSC::FunctionExecutable>(codeBlock->ownerExecutable())->unlinkedExecutable();
     if (!unlinkedExecutable->isBuiltinDefaultClassConstructor()) {
         return {};
     }

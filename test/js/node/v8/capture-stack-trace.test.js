@@ -1282,7 +1282,8 @@ test("an exception in a class field initializer reports the field's position", a
     stacks: {
       derived: {
         message: "undefined is not an object (evaluating 'cfg.port')",
-        frames: ["at <instance_members_initializer> (fields.js:3:10)", "at new Base (fields.js:2:1)"],
+        // The ".stack" string omits a column of 1.
+        frames: ["at <instance_members_initializer> (fields.js:3:10)", "at new Base (fields.js:2)"],
       },
       explicit: {
         message: "undefined is not an object (evaluating 'cfg.port')",
@@ -1295,9 +1296,10 @@ test("an exception in a class field initializer reports the field's position", a
     },
     callSites: {
       message: "undefined is not an object (evaluating 'cfg.port')",
+      // Call site columns are zero based.
       frames: [
-        { name: "<instance_members_initializer>", file: "fields.js", line: 3, column: 10, isConstructor: false },
-        { name: "Base", file: "fields.js", line: 2, column: 1, isConstructor: true },
+        { name: "<instance_members_initializer>", file: "fields.js", line: 3, column: 9, isConstructor: false },
+        { name: "Base", file: "fields.js", line: 2, column: 0, isConstructor: true },
       ],
     },
   });

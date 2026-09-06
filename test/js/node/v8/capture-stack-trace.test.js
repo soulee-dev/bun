@@ -1225,8 +1225,8 @@ test.concurrent.each([[{}], [{ BUN_JSC_useSourceProviderCache: "0" }]])(
 );
 
 // A class field initializer runs as a function of its own. Its frame must stay in the trace and report the field's
-// position. The constructor of a class that declares none is synthesized from JSC's own "(function () { })", which has
-// no URL, so its frame reports the class declaration instead.
+// position, and the error message must quote the field's expression. (The frame of a constructor that JSC synthesized
+// for a class without one still reports JSC's template source; #38507 maps it to the class declaration.)
 test("an exception in a class field initializer reports the field's position", async () => {
   using dir = tempDir("class-field-initializer-frames", {
     "fields.js": [
@@ -1257,7 +1257,7 @@ test("an exception in a class field initializer reports the field's position", a
       `const lines = stack => stack.split("\\n").slice(1, 3).map(line => line.trim().replace(__dirname + "/", ""));`,
       `const stacks = { derived: frames(() => new Derived(), lines), explicit: frames(() => new Explicit(), lines), static: frames(makeStatic, lines) };`,
       `Error.prepareStackTrace = (_error, callSites) =>`,
-      `  callSites.slice(0, 2).map(callSite => ({`,
+      `  callSites.slice(0, 1).map(callSite => ({`,
       `    name: callSite.getFunctionName(),`,
       `    file: basename(callSite.getFileName()),`,
       `    line: callSite.getLineNumber(),`,
@@ -1282,8 +1282,7 @@ test("an exception in a class field initializer reports the field's position", a
     stacks: {
       derived: {
         message: "undefined is not an object (evaluating 'cfg.port')",
-        // The ".stack" string omits a column of 1.
-        frames: ["at <instance_members_initializer> (fields.js:3:10)", "at new Base (fields.js:2)"],
+        frames: ["at <instance_members_initializer> (fields.js:3:10)", expect.stringMatching(/^at new Base \(/)],
       },
       explicit: {
         message: "undefined is not an object (evaluating 'cfg.port')",
@@ -1297,16 +1296,11 @@ test("an exception in a class field initializer reports the field's position", a
     callSites: {
       message: "undefined is not an object (evaluating 'cfg.port')",
       // Call site columns are zero based.
-      frames: [
-        { name: "<instance_members_initializer>", file: "fields.js", line: 3, column: 9, isConstructor: false },
-        { name: "Base", file: "fields.js", line: 2, column: 0, isConstructor: true },
-      ],
+      frames: [{ name: "<instance_members_initializer>", file: "fields.js", line: 3, column: 9, isConstructor: false }],
     },
   });
   // The uncaught error printer excerpts the field's line, not JSC's "(function () { })".
   expect(stderr).toContain("3 |   port = cfg.port;");
   expect(stderr).toMatch(/at <instance_members_initializer> \(.*fields\.js:3:10\)/);
-  expect(stderr).toMatch(/at new Base \(.*fields\.js:2:1\)/);
-  expect(stderr).toMatch(/at new Derived \(.*fields\.js:5:1\)/);
   expect(exitCode).toBe(1);
 });

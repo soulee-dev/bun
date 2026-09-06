@@ -650,14 +650,23 @@ mod _async_tasks {
         pub(crate) tracker: AsyncTaskTracker,
     }
 
-    /// A completion released unrun at teardown still holds the fd it opened.
+    /// A completion released unrun at teardown still holds the fd it opened;
+    /// a close the request never performed goes back on the tracking list.
     #[cfg(windows)]
     impl<R: FsReturn, A: FsArgument, const F: NodeFSFunctionEnum> Drop for UVFSRequest<R, A, F> {
         fn drop(&mut self) {
-            if let Ok(res) = &self.result {
-                if let Some(fd) = res.opened_fd() {
-                    fd.close();
+            match &self.result {
+                Ok(res) => {
+                    if let Some(fd) = res.opened_fd() {
+                        fd.close();
+                    }
                 }
+                Err(e) if e.errno == 0 || e.errno == E::ECANCELED as _ => {
+                    if let Some(fd) = self.args.closed_fd() {
+                        VirtualMachine::get().as_mut().track_managed_fd(fd);
+                    }
+                }
+                Err(_) => {}
             }
         }
     }

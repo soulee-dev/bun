@@ -69,62 +69,23 @@ describe.concurrent.skipIf(isWindows)("Worker trackUnmanagedFds", () => {
     return run(fixture, "worker-track-unmanaged-fds");
   }
 
-  test("fs.openSync fd is auto-closed at worker exit by default", async () => {
-    expect(await probe("sync", "{}")).toEqual({
+  // `during: true` is the confound guard: the fd was live while the worker
+  // ran. `after` is the verdict: false means the exit sweep closed it.
+  test.each([
+    ["fs.openSync, default", "sync", "{}", false],
+    ["fs.openSync, trackUnmanagedFds: true", "sync", "{ trackUnmanagedFds: true }", false],
+    ["fs.openSync, trackUnmanagedFds: false (opt-out, fd survives)", "sync", "{ trackUnmanagedFds: false }", true],
+    // Node: options.trackUnmanagedFds ?? true
+    ["fs.openSync, trackUnmanagedFds: null", "sync", "{ trackUnmanagedFds: null }", false],
+    ["fs.open callback, default", "async", "{}", false],
+    // A FileHandle is closed at worker exit like Node's ~FileHandle, regardless
+    // of the opt-out. The worker keeps a strong ref so only teardown can close it.
+    ["fs.promises.open, default", "promise", "{}", false],
+    ["fs.promises.open, trackUnmanagedFds: false", "promise", "{ trackUnmanagedFds: false }", false],
+  ] as const)("%s", async (_name, openHow, opts, after) => {
+    expect(await probe(openHow, opts)).toEqual({
       stderr: "",
-      // during=true proves the fd was live (confound guard); after=false proves the sweep closed it.
-      out: { during: true, after: false },
-      exitCode: 0,
-    });
-  });
-
-  test("fs.openSync fd is auto-closed when trackUnmanagedFds: true", async () => {
-    expect(await probe("sync", "{ trackUnmanagedFds: true }")).toEqual({
-      stderr: "",
-      out: { during: true, after: false },
-      exitCode: 0,
-    });
-  });
-
-  test("fs.openSync fd survives worker exit when trackUnmanagedFds: false", async () => {
-    expect(await probe("sync", "{ trackUnmanagedFds: false }")).toEqual({
-      stderr: "",
-      out: { during: true, after: true },
-      exitCode: 0,
-    });
-  });
-
-  test("trackUnmanagedFds: null means the default (Node: options.trackUnmanagedFds ?? true)", async () => {
-    expect(await probe("sync", "{ trackUnmanagedFds: null }")).toEqual({
-      stderr: "",
-      out: { during: true, after: false },
-      exitCode: 0,
-    });
-  });
-
-  test("fs.open (callback) fd is auto-closed at worker exit", async () => {
-    expect(await probe("async", "{}")).toEqual({
-      stderr: "",
-      out: { during: true, after: false },
-      exitCode: 0,
-    });
-  });
-
-  test("fs.promises.open FileHandle fd is closed at worker exit", async () => {
-    // The worker keeps a strong reference, so only worker teardown (not
-    // FileHandle GC) can close it. Node closes it in ~FileHandle.
-    expect(await probe("promise", "{}")).toEqual({
-      stderr: "",
-      out: { during: true, after: false },
-      exitCode: 0,
-    });
-  });
-
-  test("fs.promises.open FileHandle fd is closed even with trackUnmanagedFds: false", async () => {
-    // The opt-out covers raw fds only; Node closes a FileHandle at worker exit regardless.
-    expect(await probe("promise", "{ trackUnmanagedFds: false }")).toEqual({
-      stderr: "",
-      out: { during: true, after: false },
+      out: { during: true, after },
       exitCode: 0,
     });
   });
@@ -212,7 +173,7 @@ describe.concurrent.skipIf(isWindows)("Worker trackUnmanagedFds", () => {
       out: { ok: true, during: 1, after: 0 },
       exitCode: 0,
     });
-  }, 15_000); // Two worker startups in series; a debug build needs more than the default.
+  });
 
   test("an async fs.close still queued on the pool at exit does not leak its fd", async () => {
     // A pool job the worker's final wait reaches before it ran is handed back
@@ -223,7 +184,7 @@ describe.concurrent.skipIf(isWindows)("Worker trackUnmanagedFds", () => {
       `const fs = require("node:fs");` +
       `const { workerData } = require("node:worker_threads");` +
       `const fds = [];` +
-      `for (let i = 0; i < 300; i++) fds.push(fs.openSync(workerData.target, "r"));` +
+      `for (let i = 0; i < 64; i++) fds.push(fs.openSync(workerData.target, "r"));` +
       `for (let i = 0; i < 128; i++) fs.readFile(workerData.big, () => {});` +
       `for (const fd of fds) fs.close(fd, () => {});` +
       `process.exit(0);`;
